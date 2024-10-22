@@ -1,0 +1,130 @@
+// server
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+
+#define SERVER_FIFO "/tmp/server_fifo"
+#define BUFFER_SIZE 1024
+
+void handle_system_call(int client_fd, int pid, int sys_call_num, int num_params, char *params);
+
+int main() {
+    char buffer[BUFFER_SIZE];
+    char client_fifo[BUFFER_SIZE];
+    int server_fd, client_fd;
+    int pid, sys_call_num, num_params;
+    char params[BUFFER_SIZE];
+
+    // Create the well-known FIFO (server FIFO)
+    unlink(SERVER_FIFO);
+    if (mkfifo(SERVER_FIFO, 0666) == -1) {
+        perror("mkfifo");
+        exit(EXIT_FAILURE);
+    }
+
+    // Open the server FIFO for reading
+    if ((server_fd = open(SERVER_FIFO, O_RDONLY)) == -1) {
+        perror("Server FIFO open failed");
+        exit(EXIT_FAILURE);
+    }
+
+    while (1) {
+        // Read the request from the client
+        memset(buffer, 0, BUFFER_SIZE);
+        if (read(server_fd, buffer, BUFFER_SIZE) > 0) {
+
+            // Parse the message received from the client
+            sscanf(buffer, "%d %d %d %[^\n]", &pid, &sys_call_num, &num_params, params);
+
+            printf("Client PID: %d\n", pid);
+            printf("System Call: %d\n", sys_call_num);
+            printf("Number of Params: %d\n", num_params);
+            printf("Params: %s\n", params);
+
+            // Handle connect (System Call 1)
+            if (sys_call_num == 1) {
+                // Extract client FIFO name from params
+                strcpy(client_fifo, params);
+                client_fd = open(client_fifo, O_WRONLY);
+                if (client_fd == -1) {
+                    perror("Client FIFO open failed");
+                    continue;
+                }
+                printf("Client FIFO connected: %s\n", client_fifo);
+                continue; // Continue to the next request
+            }
+
+            // Handle other system calls
+            handle_system_call(client_fd, pid, sys_call_num, num_params, params);
+        }
+    }
+
+    close(server_fd);
+    unlink(SERVER_FIFO);
+    return 0;
+}
+
+void handle_system_call(int client_fd, int pid, int sys_call_num, int num_params, char *params) {
+    static int stored_value = 0;  // Persistent storage for system call 4 and 5
+    char response[BUFFER_SIZE];
+
+    switch (sys_call_num) {
+        case 2: {  // Number to text
+            int num;
+            sscanf(params, "%d", &num);
+            char *text_rep[] = {"zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"};
+            if (num >= 0 && num <= 9) {
+                snprintf(response, BUFFER_SIZE, "Converted %d to %s", num, text_rep[num]);
+            } else {
+                snprintf(response, BUFFER_SIZE, "Invalid number: %d", num);
+            }
+            break;
+        }
+
+        case 3: {  // Text to number
+            if (strcmp(params, "zero") == 0) snprintf(response, BUFFER_SIZE, "0");
+            else if (strcmp(params, "one") == 0) snprintf(response, BUFFER_SIZE, "1");
+            else if (strcmp(params, "two") == 0) snprintf(response, BUFFER_SIZE, "2");
+            else if (strcmp(params, "three") == 0) snprintf(response, BUFFER_SIZE, "3");
+            else if (strcmp(params, "four") == 0) snprintf(response, BUFFER_SIZE, "4");
+            else if (strcmp(params, "five") == 0) snprintf(response, BUFFER_SIZE, "5");
+            else if (strcmp(params, "six") == 0) snprintf(response, BUFFER_SIZE, "6");
+            else if (strcmp(params, "seven") == 0) snprintf(response, BUFFER_SIZE, "7");
+            else if (strcmp(params, "eight") == 0) snprintf(response, BUFFER_SIZE, "8");
+            else if (strcmp(params, "nine") == 0) snprintf(response, BUFFER_SIZE, "9");
+            else snprintf(response, BUFFER_SIZE, "Invalid text: %s", params);
+            break;
+        }
+
+        case 4:  // Store a value
+            sscanf(params, "%d", &stored_value);
+            snprintf(response, BUFFER_SIZE, "Value stored: %d", stored_value);
+            break;
+
+        case 5:  // Recall the stored value
+            snprintf(response, BUFFER_SIZE, "Recalled value: %d", stored_value);
+            break;
+
+        case 0:  // Client exit
+            snprintf(response, BUFFER_SIZE, "Client %d exiting.", pid);
+            close(client_fd);
+            break;
+
+        case -1:  // Terminate server
+            snprintf(response, BUFFER_SIZE, "Terminating server.");
+            close(client_fd);
+            exit(EXIT_SUCCESS);
+            break;
+
+        default:
+            snprintf(response, BUFFER_SIZE, "Unknown system call: %d", sys_call_num);
+            break;
+    }
+
+    // Send the response back to the client
+    write(client_fd, response, strlen(response) + 1);
+}                                                    
