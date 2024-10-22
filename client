@@ -1,0 +1,79 @@
+// client
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+
+#define SERVER_FIFO "/tmp/server_fifo"
+#define BUFFER_SIZE 1024
+
+int main() {
+    char client_fifo[BUFFER_SIZE];
+    char buffer[BUFFER_SIZE];
+    int server_fd, client_fd;
+    int pid = getpid();  // Use the process ID as client ID
+
+    // Create the client-specific FIFO
+    snprintf(client_fifo, BUFFER_SIZE, "/tmp/client_%d_fifo", pid);
+    unlink(client_fifo);
+    if (mkfifo(client_fifo, 0666) == -1) {
+        perror("mkfifo");
+        exit(EXIT_FAILURE);
+    }
+
+    // Open the server FIFO for writing
+    if ((server_fd = open(SERVER_FIFO, O_WRONLY)) == -1) {
+        perror("Server FIFO open failed");
+        exit(EXIT_FAILURE);
+    }
+
+    // Send the connect request to the server (System Call 1)
+    snprintf(buffer, BUFFER_SIZE, "%d 1 1 %s", pid, client_fifo);
+    write(server_fd, buffer, strlen(buffer) + 1);
+
+    // Open the client-specific FIFO for reading
+    if ((client_fd = open(client_fifo, O_RDONLY)) == -1) {
+        perror("Client FIFO open failed");
+        exit(EXIT_FAILURE);
+    }
+
+    while (1) {
+        int sys_call_num, num_params;
+        char params[BUFFER_SIZE];
+
+        printf("Enter system call (2: Num to Text, 3: Text to Num, 4: Store, 5: Recall, 0: Exit, -1: Terminate): ");
+        scanf("%d", &sys_call_num);
+
+        // Prepare the request based on system call
+        if (sys_call_num == 0 || sys_call_num == -1) {
+            snprintf(buffer, BUFFER_SIZE, "%d %d 0", pid, sys_call_num);
+            write(server_fd, buffer, strlen(buffer) + 1);
+            break;
+        } else if (sys_call_num == 2 || sys_call_num == 4) {
+            printf("Enter number (0-9 for call 2, any integer for call 4): ");
+            scanf("%s", params);
+            snprintf(buffer, BUFFER_SIZE, "%d %d 1 %s", pid, sys_call_num, params);
+        } else if (sys_call_num == 3) {
+            printf("Enter text (zero, one, two, ...): ");
+            scanf("%s", params);
+            snprintf(buffer, BUFFER_SIZE, "%d %d 1 %s", pid, sys_call_num, params);
+        } else if (sys_call_num == 5) {
+            snprintf(buffer, BUFFER_SIZE, "%d %d 0", pid, sys_call_num);
+        }
+
+        // Send the request to the server
+        write(server_fd, buffer, strlen(buffer) + 1);
+
+        // Read and print the response from the server
+        read(client_fd, buffer, BUFFER_SIZE);
+        printf("Server Response: %s\n", buffer);
+    }
+
+    close(client_fd);
+    close(server_fd);
+    unlink(client_fifo);  // Clean up FIFO on exit
+    return 0;
+}
